@@ -1,262 +1,164 @@
-import cv2
 import numpy as np
+import cv2
 import json
 import os
 
-def track_person_with_binary_mask(matted_video_path, binary_video_path, output_video_path, tracking_json_path):
-    """
-    Track person using the binary mask video - this is the most reliable method.
-    The binary video shows exactly where the person is!
-    """
-    print("Starting person tracking using binary mask...")
-    
-    # Open both videos
-    matted_cap = cv2.VideoCapture(matted_video_path)
-    binary_cap = cv2.VideoCapture(binary_video_path)
-    
-    if not matted_cap.isOpened():
-        raise ValueError(f"Cannot open matted video: {matted_video_path}")
-    if not binary_cap.isOpened():
-        raise ValueError(f"Cannot open binary video: {binary_video_path}")
-    
-    # Get video properties
-    fps = int(matted_cap.get(cv2.CAP_PROP_FPS))
-    width = int(matted_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(matted_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(matted_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
-    
-    tracking_data = {}
-    frame_number = 0
-    last_valid_bbox = None
-    
-    while True:
-        # Read frames from both videos
-        ret_matted, matted_frame = matted_cap.read()
-        ret_binary, binary_frame = binary_cap.read()
-        
-        if not ret_matted or not ret_binary:
-            break
-        
-        # Convert binary frame to grayscale if needed
-        if len(binary_frame.shape) == 3:
-            binary_gray = cv2.cvtColor(binary_frame, cv2.COLOR_BGR2GRAY)
-        else:
-            binary_gray = binary_frame
-        
-        # Find person in binary mask
-        bbox = find_person_in_binary_mask(binary_gray)
-        
-        if bbox is not None:
-            last_valid_bbox = bbox
-            current_bbox = bbox
-        else:
-            # Use last known position if no detection
-            current_bbox = last_valid_bbox if last_valid_bbox else (width//3, height//4, width//4, height//2)
-        
-        # Draw rectangle on matted frame
-        x, y, w, h = current_bbox
-        cv2.rectangle(matted_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        
-        # Add frame number for debugging
-        cv2.putText(matted_frame, f'Frame: {frame_number}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Store tracking data in required format [ROW, COL, HEIGHT, WIDTH]
-        tracking_data[str(frame_number)] = [int(y), int(x), int(h), int(w)]
-        
-        # Write frame
-        out.write(matted_frame)
-        frame_number += 1
-        
-        if frame_number % 50 == 0:
-            print(f"Processed {frame_number}/{total_frames} frames")
-    
-    # Cleanup
-    matted_cap.release()
-    binary_cap.release()
-    out.release()
-    
-    # Save tracking JSON
-    with open(tracking_json_path, 'w') as f:
-        json.dump(tracking_data, f, indent=2)
-    
-    print(f"Tracking completed! Output saved to: {output_video_path}")
-    print(f"Tracking data saved to: {tracking_json_path}")
-    
-    return tracking_data
-
-def find_person_in_binary_mask(binary_mask):
-    """
-    Find the person's bounding box from binary mask.
-    This is the most accurate method since the mask shows exactly where the person is.
-    """
-    # Threshold the image to ensure it's truly binary
-    _, thresh = cv2.threshold(binary_mask, 127, 255, cv2.THRESH_BINARY)
-    
-    # Find contours
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
-        return None
-    
-    # Find the largest contour (should be the person)
-    largest_contour = max(contours, key=cv2.contourArea)
-    
-    # Get bounding rectangle
-    x, y, w, h = cv2.boundingRect(largest_contour)
-    
-    # Add small padding around the person
-    padding = 10
-    x = max(0, x - padding)
-    y = max(0, y - padding)
-    w = min(binary_mask.shape[1] - x, w + 2 * padding)
-    h = min(binary_mask.shape[0] - y, h + 2 * padding)
-    
-    # Validate the bounding box
-    area = cv2.contourArea(largest_contour)
-    if area < 500:  # Too small to be a person
-        return None
-    
-    aspect_ratio = h / w if w > 0 else 0
-    if aspect_ratio < 0.5 or aspect_ratio > 5.0:  # Not person-like
-        return None
-    
-    return (x, y, w, h)
-
-def track_person_fallback(matted_video_path, output_video_path, tracking_json_path):
-    """
-    Fallback tracking method if binary video is not available.
-    Uses simple person detection on each frame.
-    """
-    print("Starting fallback person tracking...")
-    
-    cap = cv2.VideoCapture(matted_video_path)
+def get_video_files(path):
+    """Get video properties"""
+    cap = cv2.VideoCapture(path)
     if not cap.isOpened():
-        raise ValueError(f"Cannot open video: {matted_video_path}")
+        raise ValueError(f"Cannot open video: {path}")
     
-    # Get video properties
+    video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
-    
-    tracking_data = {}
-    frame_number = 0
-    
-    # Initialize person position (assume person starts roughly in center-right)
-    person_x = int(width * 0.6)  # Start looking on the right side
-    person_y = int(height * 0.3)
-    person_w = int(width * 0.15)  # Reasonable person width
-    person_h = int(height * 0.4)   # Reasonable person height
+    return cap, video_width, video_height, fps
+
+def load_entire_video(cap, color_space='bgr'):
+    """Load all video frames"""
+    frames = []
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reset to beginning
     
     while True:
         ret, frame = cap.read()
         if not ret:
             break
+        frames.append(frame)
+    
+    return frames
+
+def write_video(output_path, frames, fps, size, is_color=True):
+    """Write video"""
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(output_path, fourcc, fps, size, is_color)
+    
+    for frame in frames:
+        out.write(frame)
+    
+    out.release()
+
+def automatic_roi_selection(frame):
+    """
+    Automatic ROI selection with coordinates to cover the full person including legs.
+    """
+    height, width = frame.shape[:2]
+    
+    # Adjusted coordinates to cover full person including legs
+    person_left_percent = 0.03    # Move slightly more left to capture full width
+    person_top_percent = 0.12     # Start higher to capture head better
+    person_width_percent = 0.20   # Much wider to capture full body width including arms
+    person_height_percent = 0.75  # Much taller to capture full legs down to feet
+    
+    # Convert percentages to pixel coordinates
+    x = int(width * person_left_percent)
+    y = int(height * person_top_percent)
+    w = int(width * person_width_percent)
+    h = int(height * person_height_percent)
+    
+    print(f"Full-body ROI: ({x}, {y}, {w}, {h})")
+    print(f"This should cover the person from head to feet")
+    
+    return (x, y, w, h)
+
+def track_video_auto(input_video_path, output_video_path, tracking_json_path):
+    """
+    Your friend's tracking with automatic ROI selection - no user interaction.
+    """
+    print('Starting Automatic Tracking')
+
+    cap_stabilize, video_width, video_height, fps = get_video_files(path=input_video_path)
+    frames_bgr = load_entire_video(cap_stabilize, color_space='bgr')
+    
+    # Use automatic ROI selection
+    initBB = automatic_roi_selection(frames_bgr[0])
+    
+    x, y, w, h = initBB
+    print(f"Using automatic ROI: ({x}, {y}, {w}, {h})")
+    
+    track_window = (x, y, w, h)
+
+    # Set up the ROI for tracking (exactly like your friend's code)
+    roi = frames_bgr[0][y:y + h, x:x + w]
+    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    reducing_light_mask = cv2.inRange(hsv_roi, np.array((0., 60., 32.)), np.array((180., 255., 255.)))
+    roi_hist = cv2.calcHist([hsv_roi], [0, 1], reducing_light_mask, [256, 256], [0, 256, 0, 256])
+    cv2.normalize(roi_hist, roi_hist, 0, 255, cv2.NORM_MINMAX)
+    
+    # Setup the termination criteria
+    term_crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0)
+    
+    # Process frames
+    tracking_frames_list = []
+    tracking_data = {}
+    
+    # First frame
+    first_frame = cv2.rectangle(frames_bgr[0].copy(), (x, y), (x + w, y + h), (0, 255, 0), 2)
+    cv2.putText(first_frame, f'Frame: 0', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    tracking_frames_list.append(first_frame)
+    tracking_data["0"] = [y, x, h, w]
+    
+    # Track remaining frames
+    for frame_index, frame in enumerate(frames_bgr[1:], 1):
+        if frame_index % 50 == 0:
+            print(f"[Tracking] Frame: {frame_index} / {len(frames_bgr) - 1}")
         
-        # Try to detect person using HOG
-        hog_bbox = detect_person_hog(frame)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        dst = cv2.calcBackProject([hsv], [0, 1], roi_hist, [0, 256, 0, 256], 1)
         
-        if hog_bbox is not None:
-            # Use HOG detection
-            person_x, person_y, person_w, person_h = hog_bbox
-        else:
-            # Move the bounding box slightly to simulate tracking
-            # This is a very basic approach but better than nothing
-            if frame_number > 0:
-                # Assume person moves slowly to the right
-                person_x += 2  # Move slightly right each frame
-                
-                # Keep within bounds
-                if person_x + person_w > width:
-                    person_x = width - person_w
-        
-        # Ensure bounding box is within frame
-        person_x = max(0, min(person_x, width - person_w))
-        person_y = max(0, min(person_y, height - person_h))
+        # Apply meanshift
+        ret, track_window = cv2.meanShift(dst, track_window, term_crit)
         
         # Draw rectangle
-        cv2.rectangle(frame, (person_x, person_y), (person_x + person_w, person_y + person_h), (0, 255, 0), 2)
+        x, y, w, h = track_window
+        tracked_img = cv2.rectangle(frame.copy(), (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(tracked_img, f'Frame: {frame_index}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        # Add frame number
-        cv2.putText(frame, f'Frame: {frame_number}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Store tracking data [ROW, COL, HEIGHT, WIDTH]
-        tracking_data[str(frame_number)] = [int(person_y), int(person_x), int(person_h), int(person_w)]
-        
-        # Write frame
-        out.write(frame)
-        frame_number += 1
-        
-        if frame_number % 50 == 0:
-            print(f"Processed {frame_number}/{total_frames} frames")
+        tracking_frames_list.append(tracked_img)
+        tracking_data[str(frame_index)] = [y, x, h, w]
+
+    # Write outputs
+    write_video(output_video_path, tracking_frames_list, fps, (video_width, video_height), is_color=True)
     
-    cap.release()
-    out.release()
-    
-    # Save tracking JSON
     with open(tracking_json_path, 'w') as f:
         json.dump(tracking_data, f, indent=2)
     
+    print('✅ Automatic tracking completed!')
+    print(f'Output video: {output_video_path}')
+    print(f'Tracking JSON: {tracking_json_path}')
+    
+    cap_stabilize.release()
+    
     return tracking_data
 
-def detect_person_hog(frame):
+def run_auto_tracking(student_id1, student_id2):
     """
-    Simple HOG person detection.
+    Fully automatic tracking - no user interaction required.
     """
-    try:
-        hog = cv2.HOGDescriptor()
-        hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-        
-        boxes, weights = hog.detectMultiScale(frame, winStride=(8,8), padding=(32,32), scale=1.05)
-        
-        if len(boxes) > 0:
-            best_idx = np.argmax(weights)
-            x, y, w, h = boxes[best_idx]
-            return (int(x), int(y), int(w), int(h))
-        
-    except:
-        pass
-    
-    return None
-
-def run_tracking_simple(student_id1, student_id2):
-    """
-    Main tracking function - tries binary mask method first, then fallback.
-    """
-    # File paths
     matted_video = f"../Outputs/matted_{student_id1}_{student_id2}.avi"
-    binary_video = f"../Outputs/binary_{student_id1}_{student_id2}.avi"
     output_video = f"../Outputs/OUTPUT_{student_id1}_{student_id2}.avi"
     tracking_json = "../Outputs/tracking.json"
     
-    # Ensure output directory exists
-    os.makedirs("../Outputs", exist_ok=True)
+    if not os.path.exists(matted_video):
+        print(f"Error: Input video not found: {matted_video}")
+        return False
+    
+    os.makedirs("Outputs", exist_ok=True)
     
     try:
-        # Try binary mask method first (most accurate)
-        if os.path.exists(binary_video):
-            print("Using binary mask for tracking (most accurate method)")
-            tracking_data = track_person_with_binary_mask(matted_video, binary_video, output_video, tracking_json)
-        else:
-            print("Binary video not found, using fallback method")
-            tracking_data = track_person_fallback(matted_video, output_video, tracking_json)
-        
-        print("✅ Tracking completed successfully!")
+        tracking_data = track_video_auto(matted_video, output_video, tracking_json)
+        print("✅ Automatic tracking completed successfully!")
+        print(f"Tracked {len(tracking_data)} frames")
         return True
-        
     except Exception as e:
         print(f"❌ Tracking failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":
-    # Test the tracking
-    
-    run_tracking_simple("208484097", "318931573")
+    success = run_auto_tracking("208484097", "318931573")
+    if success:
+        print("Automatic tracking completed successfully!")
+    else:
+        print("Automatic tracking failed!")
