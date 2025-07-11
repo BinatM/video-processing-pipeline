@@ -6,7 +6,7 @@ from scipy.stats import gaussian_kde
 
 # Constants for bandwidth in KDE estimation
 BW_MEDIUM = 1
-BW_NARROW = 0.1
+BW_NARROW = 0.2
 
 # Height thresholds for different body parts in the frame
 LEGS_HEIGHT = 805
@@ -14,7 +14,7 @@ SHOES_HEIGHT = 870
 SHOULDERS_HEIGHT = 405
 
 # Threshold for blue color masking
-BLUE_MASK_THR = 140
+BLUE_MASK_THR = 130
 
 # Window dimensions for processing regions of interest
 WINDOW_WIDTH = 500
@@ -164,10 +164,10 @@ def collect_body_and_shoes_colors(frames_bgr, mask_list, n_frames, height, width
         # Collect indices for shoes color sampling
         shoes_mask = np.copy(person_and_blue_mask)
         shoes_mask[:SHOES_HEIGHT, :] = 0
-        shoes_foreground_indices = choose_indices_for_foreground(shoes_mask, 20)
+        shoes_foreground_indices = choose_indices_for_foreground(shoes_mask, 100)
         shoes_mask = np.copy(person_and_blue_mask)
         shoes_mask[:SHOES_HEIGHT - 120, :] = 1
-        shoes_background_indices = choose_indices_for_background(shoes_mask, 20)
+        shoes_background_indices = choose_indices_for_background(shoes_mask, 100)
         
         person_and_blue_mask_list[frame_index] = person_and_blue_mask
         
@@ -229,7 +229,8 @@ def apply_kde_filtering_for_body_and_shoes(frames_bgr, person_and_blue_mask_list
         
         shoes_ratio = shoes_fg_probs / (shoes_fg_probs + shoes_bg_probs)
         shoes_foreground_mask = np.zeros(window_mask.shape)
-        shoes_foreground_mask[shoes_area_indices] = (shoes_ratio > 0.75).astype(np.uint8)
+        shoes_foreground_mask[shoes_area_indices] = (shoes_ratio > 0.7).astype(np.uint8)
+        shoes_foreground_mask = cv2.morphologyEx(shoes_foreground_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         
         shoes_indices = np.where(shoes_foreground_mask == 1)
         y_shoes_center, x_shoes_center = int(np.mean(shoes_indices[0])), int(np.mean(shoes_indices[1]))
@@ -416,20 +417,11 @@ def background_subtraction(input_video_path, output_path):
         frames_bgr, combined_masks, face_foreground_pdf, face_background_pdf, n_frames, height, width)
     
     # Step 9: Save the results as videos
-    extracted_output_path = os.path.join("FinalProject/Outputs", "extracted_208484097_318931573.avi")
-    binary_output_path = os.path.join("FinalProject/Outputs", "binary_208484097_318931573.avi")
+    extracted_output_path = os.path.join("Outputs", "extracted_208484097_318931573.avi")
+    binary_output_path = os.path.join("Outputs", "binary_208484097_318931573.avi")
     write_video(extracted_output_path, frames=final_frames, fps=fps, out_size=(width, height), is_color=True)
     write_video(binary_output_path, frames=final_masks, fps=fps, out_size=(width, height), is_color=False)
     print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Output videos saved: extracted and binary masks.")
     
     cap.release()
     cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    input_video = "FinalProject/Outputs/stabilize_208484097_318931573.avi"
-    output_dir = "FinalProject/Outputs"
-    start_time = time.time()
-    print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Initiating background subtraction process...")
-    background_subtraction(input_video, output_dir)
-    print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Background subtraction completed in {time.time() - start_time:.2f} seconds.")

@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import json
 import os
+import time
 
 def get_video_files(path):
     """Get video properties"""
@@ -14,6 +15,7 @@ def get_video_files(path):
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     
     return cap, video_width, video_height, fps
+
 
 def load_entire_video(cap, color_space='bgr'):
     """Load all video frames"""
@@ -28,6 +30,7 @@ def load_entire_video(cap, color_space='bgr'):
     
     return frames
 
+
 def write_video(output_path, frames, fps, size, is_color=True):
     """Write video"""
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -37,6 +40,7 @@ def write_video(output_path, frames, fps, size, is_color=True):
         out.write(frame)
     
     out.release()
+
 
 def automatic_roi_selection(frame):
     """
@@ -56,8 +60,8 @@ def automatic_roi_selection(frame):
     w = int(width * person_width_percent)
     h = int(height * person_height_percent)
     
-    print(f"Full-body ROI: ({x}, {y}, {w}, {h})")
-    print(f"This should cover the person from head to feet")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Full-body ROI: ({x}, {y}, {w}, {h})")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] This should cover the person from head to feet")
     
     return (x, y, w, h)
 
@@ -65,7 +69,7 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     """
     Your friend's tracking with automatic ROI selection - no user interaction.
     """
-    print('Starting Automatic Tracking')
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Starting automatic tracking")
 
     cap_stabilize, video_width, video_height, fps = get_video_files(path=input_video_path)
     frames_bgr = load_entire_video(cap_stabilize, color_space='bgr')
@@ -74,7 +78,7 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     initBB = automatic_roi_selection(frames_bgr[0])
     
     x, y, w, h = initBB
-    print(f"Using automatic ROI: ({x}, {y}, {w}, {h})")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Using automatic ROI: ({x}, {y}, {w}, {h})")
     
     track_window = (x, y, w, h)
 
@@ -100,9 +104,6 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     
     # Track remaining frames
     for frame_index, frame in enumerate(frames_bgr[1:], 1):
-        if frame_index % 50 == 0:
-            print(f"[Tracking] Frame: {frame_index} / {len(frames_bgr) - 1}")
-        
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         dst = cv2.calcBackProject([hsv], [0, 1], roi_hist, [0, 256, 0, 256], 1)
         
@@ -123,42 +124,36 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     with open(tracking_json_path, 'w') as f:
         json.dump(tracking_data, f, indent=2)
     
-    print('✅ Automatic tracking completed!')
-    print(f'Output video: {output_video_path}')
-    print(f'Tracking JSON: {tracking_json_path}')
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Automatic tracking completed")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Output video saved: {output_video_path}")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Tracking JSON saved: {tracking_json_path}")
     
     cap_stabilize.release()
     
     return tracking_data
 
-def run_auto_tracking(student_id1, student_id2):
+
+def run_auto_tracking(student_id1, student_id2, output_dir):
     """
     Fully automatic tracking - no user interaction required.
     """
-    matted_video = f"../Outputs/matted_{student_id1}_{student_id2}.avi"
-    output_video = f"../Outputs/OUTPUT_{student_id1}_{student_id2}.avi"
-    tracking_json = "../Outputs/tracking.json"
+    matted_video = os.path.join(output_dir, f"matted_{student_id1}_{student_id2}.avi")
+    output_video = os.path.join(output_dir, f"OUTPUT_{student_id1}_{student_id2}.avi")
+    tracking_json = os.path.join(output_dir, f"tracking.json")
     
     if not os.path.exists(matted_video):
         print(f"Error: Input video not found: {matted_video}")
         return False
     
-    os.makedirs("Outputs", exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
     try:
         tracking_data = track_video_auto(matted_video, output_video, tracking_json)
-        print("✅ Automatic tracking completed successfully!")
-        print(f"Tracked {len(tracking_data)} frames")
+        print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Automatic tracking completed successfully")
+        print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Tracked {len(tracking_data)} frames")
         return True
     except Exception as e:
-        print(f"❌ Tracking failed: {e}")
+        print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Tracking failed: {e}")
         import traceback
         traceback.print_exc()
         return False
-
-if __name__ == "__main__":
-    success = run_auto_tracking("208484097", "318931573")
-    if success:
-        print("Automatic tracking completed successfully!")
-    else:
-        print("Automatic tracking failed!")

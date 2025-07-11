@@ -1,12 +1,9 @@
-
-# import cv2
-# import numpy as np
-# import logging
-
-
-# import cv2
-# import numpy as np
-# import os
+import time
+import os
+import cv2
+import numpy as np
+import scipy.sparse as sp
+from scipy.sparse.linalg import spsolve
 
 def load_previous_outputs(ids):
     """
@@ -85,6 +82,7 @@ def create_trimap(binary_mask, erode_size=3, dilate_size=10):
     
     return trimap
 
+
 def alpha_from_trimap_distance(trimap):
     """
     Fast alpha estimation using distance transform
@@ -113,6 +111,7 @@ def alpha_from_trimap_distance(trimap):
     # Smooth the alpha
     alpha = cv2.GaussianBlur(alpha, (5, 5), 1.0)
     return np.clip(alpha, 0, 1)
+
 
 def perform_matting(extracted_frame, binary_mask, background):
     """
@@ -145,11 +144,12 @@ def perform_matting(extracted_frame, binary_mask, background):
     
     return matted_frame.astype(np.uint8), alpha
 
+
 def run_matting_stage(ids):
     """
     Main function to run the matting stage
     """
-    print("Starting matting stage...")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting matting stage...")
     id1, id2 = ids
     
     # Load previous outputs
@@ -166,7 +166,7 @@ def run_matting_stage(ids):
     
     frame_count = 0
     
-    print(f"Processing {total_frames} frames...")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Processing {total_frames} frames...")
     
     while True:
         # Read frame pair
@@ -187,8 +187,6 @@ def run_matting_stage(ids):
         alpha_writer.write(alpha_3ch)
         
         frame_count += 1
-        if frame_count % 10 == 0:
-            print(f"Processed {frame_count}/{total_frames} frames")
     
     # Cleanup
     extracted_cap.release()
@@ -196,23 +194,10 @@ def run_matting_stage(ids):
     matted_writer.release()
     alpha_writer.release()
     
-    print(f"Matting completed! Processed {frame_count} frames")
-    print(f"Output saved: {matted_path}")
-    print(f"Alpha saved: {alpha_path}")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Matting completed, processed {frame_count} frames")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Output saved: {matted_path}")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Alpha saved: {alpha_path}")
 
-# Usage example
-# if __name__ == "__main__":
-#     # Replace with your actual student IDs
-#     student_ids = ("208484097", "318931573")
-    
-#     # Run matting stage
-#     run_matting_stage(student_ids)
-
-import cv2
-import numpy as np
-import scipy.sparse as sp
-from scipy.sparse.linalg import spsolve
-import os
 
 def closed_form_matting(image, trimap, lambda_val=100, win_size=1):
     """
@@ -237,18 +222,11 @@ def closed_form_matting(image, trimap, lambda_val=100, win_size=1):
     if not np.any(unknown_mask):
         return alpha
     
-    # Build the matting Laplacian
-    print("Building matting Laplacian...")
     L = build_matting_laplacian(img, win_size)
-    
-    # Build constraint matrix
-    print("Setting up constraints...")
-    n_pixels = h * w
     
     # Known alpha values (foreground and background)
     known_mask = (trimap != 128)
     known_indices = np.where(known_mask.flatten())[0]
-    known_values = alpha.flatten()[known_indices]
     
     # Create constraint matrix
     C = sp.diags(known_mask.flatten().astype(np.float64), format='csr')
@@ -266,6 +244,7 @@ def closed_form_matting(image, trimap, lambda_val=100, win_size=1):
     alpha_result = np.clip(alpha_result, 0, 1)
     
     return alpha_result
+
 
 def build_matting_laplacian(img, win_size=1):
     """
@@ -334,6 +313,7 @@ def build_matting_laplacian(img, win_size=1):
     
     return L
 
+
 def optimized_closed_form_matting(image, trimap, lambda_val=100):
     """
     More efficient closed-form matting implementation
@@ -350,8 +330,6 @@ def optimized_closed_form_matting(image, trimap, lambda_val=100):
     unknown_mask = (trimap == 128)
     if not np.any(unknown_mask):
         return alpha
-    
-    print("Building optimized matting Laplacian...")
     
     # Use guided filter approach for efficiency
     epsilon = 1e-6
@@ -385,6 +363,7 @@ def optimized_closed_form_matting(image, trimap, lambda_val=100):
     result[trimap == 0] = 0.0
     
     return np.clip(result, 0, 1)
+
 
 def perform_matting_closed_form(extracted_frame, binary_mask, background, method='optimized'):
     """
@@ -420,17 +399,14 @@ def perform_matting_closed_form(extracted_frame, binary_mask, background, method
     
     return matted_frame.astype(np.uint8), alpha
 
+
 # Update the main matting function
 def run_matting_stage_closed_form(ids, method='optimized'):
     """
     Main function to run the matting stage with closed-form matting
     """
-    print("Starting closed-form matting stage...")
-    print(f"Method: {method}")
-    print(f"Current working directory: {os.getcwd()}")
-    
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting closed-form matting stage, method={method}")
     id1, id2 = ids
-    
     # Load previous outputs
     extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids)
     
@@ -451,7 +427,7 @@ def run_matting_stage_closed_form(ids, method='optimized'):
     
     frame_count = 0
     
-    print(f"Processing {total_frames} frames...")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Processing {total_frames} frames (closed-form)")
     
     try:
         while True:
@@ -474,8 +450,6 @@ def run_matting_stage_closed_form(ids, method='optimized'):
             alpha_writer.write(alpha_3ch)
             
             frame_count += 1
-            if frame_count % 5 == 0:  # More frequent updates since it's slower
-                print(f"Processed {frame_count}/{total_frames} frames")
     
     finally:
         # Cleanup
@@ -484,24 +458,6 @@ def run_matting_stage_closed_form(ids, method='optimized'):
         matted_writer.release()
         alpha_writer.release()
     
-    print(f"Closed-form matting completed! Processed {frame_count} frames")
-    print(f"Output saved: {matted_path}")
-    print(f"Alpha saved: {alpha_path}")
-
-# Usage example
-if __name__ == "__main__":
-    # First install required dependencies
-    try:
-        import scipy.sparse
-    except ImportError:
-        print("Please install scipy: pip install scipy")
-        exit(1)
-    
-    # Replace with your actual student IDs
-    student_ids = ("208484097", "318931573")
-    
-    # Choose method: 'optimized' (faster) or 'full' (higher quality but slower)
-    method = 'optimized'  # or 'full'
-    
-    # Run closed-form matting stage
-    run_matting_stage_closed_form(student_ids, method=method)
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form matting completed, processed {frame_count} frames")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form output saved: {matted_path}")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form alpha saved: {alpha_path}")
