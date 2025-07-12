@@ -401,7 +401,7 @@ def perform_matting_closed_form(extracted_frame, binary_mask, background, method
 
 
 # Update the main matting function
-def run_matting_stage_closed_form(ids, method='optimized'):
+def run_matting_stage_closed_form(ids, main_start_time, method='optimized'):
     """
     Main function to run the matting stage with closed-form matting
     """
@@ -409,6 +409,8 @@ def run_matting_stage_closed_form(ids, method='optimized'):
     id1, id2 = ids
     # Load previous outputs
     extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids)
+    time_alpha_created = 0
+    time_matted_created = 0
     
     # Ensure Outputs directory exists
     os.makedirs("Outputs", exist_ok=True)
@@ -452,12 +454,18 @@ def run_matting_stage_closed_form(ids, method='optimized'):
             frame_count += 1
     
     finally:
-        # Cleanup
+        # Cleanup and capture timing
         extracted_cap.release()
         binary_cap.release()
+
+        # [MODIFICATION] Release writers and capture the precise time of file completion
         matted_writer.release()
+        time_matted_created = time.time() - main_start_time
+
         alpha_writer.release()
+        time_alpha_created = time.time() - main_start_time
     
     print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form matting completed, processed {frame_count} frames")
     print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form output saved: {matted_path}")
     print(f"[MATTING | {time.strftime('%H:%M:%S')}] Closed-form alpha saved: {alpha_path}")
+    return {"time_to_alpha": time_alpha_created, "time_to_matted": time_matted_created}

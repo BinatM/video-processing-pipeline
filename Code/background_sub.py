@@ -8,10 +8,10 @@ from scipy.stats import gaussian_kde
 BW_MEDIUM = 1
 BW_NARROW = 0.2
 
-# Height thresholds for different body parts in the frame
-LEGS_HEIGHT = 805
-SHOES_HEIGHT = 870
-SHOULDERS_HEIGHT = 405
+# Height ratios for different body parts in the frame
+LEGS_HEIGHT_RATIO = 0.805
+SHOES_HEIGHT_RATIO = 0.87
+SHOULDERS_HEIGHT_RATIO = 0.405
 
 # Threshold for blue color masking
 BLUE_MASK_THR = 130
@@ -140,6 +140,9 @@ def collect_body_and_shoes_colors(frames_bgr, mask_list, n_frames, height, width
     shoes_foreground_colors = None
     shoes_background_colors = None
     person_and_blue_mask_list = np.zeros((n_frames, height, width))
+    # compute absolute heights based on frame dimensions
+    legs_height = int(height * LEGS_HEIGHT_RATIO)
+    shoes_height = int(height * SHOES_HEIGHT_RATIO)
     
     print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Starting color collection for body and shoes KDEs...")
     for frame_index, frame in enumerate(frames_bgr):
@@ -163,10 +166,10 @@ def collect_body_and_shoes_colors(frames_bgr, mask_list, n_frames, height, width
         
         # Collect indices for shoes color sampling
         shoes_mask = np.copy(person_and_blue_mask)
-        shoes_mask[:SHOES_HEIGHT, :] = 0
+        shoes_mask[:shoes_height, :] = 0
         shoes_foreground_indices = choose_indices_for_foreground(shoes_mask, 100)
         shoes_mask = np.copy(person_and_blue_mask)
-        shoes_mask[:SHOES_HEIGHT - 120, :] = 1
+        shoes_mask[:shoes_height - 120, :] = 1
         shoes_background_indices = choose_indices_for_background(shoes_mask, 100)
         
         person_and_blue_mask_list[frame_index] = person_and_blue_mask
@@ -259,12 +262,16 @@ def collect_face_colors(frames_bgr, combined_mask_list, n_frames):
     """Collect color samples for face region to build face-specific KDEs."""
     face_foreground_colors = None
     face_background_colors = None
+    # compute shoulder height based on frame dimensions
+    # Note: height is not passed directly, so infer from frames_bgr[0]
+    height = frames_bgr[0].shape[0]
+    shoulders_height = int(height * SHOULDERS_HEIGHT_RATIO)
     
     print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Starting color collection for face KDE...")
     for frame_index, frame in enumerate(frames_bgr):
         current_mask = combined_mask_list[frame_index]
         face_mask = np.copy(current_mask)
-        face_mask[SHOULDERS_HEIGHT:, :] = 0  # Focus on upper body for face
+        face_mask[shoulders_height:, :] = 0  # Focus on upper body for face
         face_mask_indices = np.where(face_mask == 1)
         y_center, x_center = int(np.mean(face_mask_indices[0])), int(np.mean(face_mask_indices[1]))
         
@@ -296,12 +303,15 @@ def apply_face_kde_and_finalize_masks(frames_bgr, combined_mask_list, face_foreg
     face_background_pdf_cache = dict()
     final_masks_list = []
     final_frames_list = []
+    # compute absolute heights based on frame dimensions
+    legs_height = int(height * LEGS_HEIGHT_RATIO)
+    shoulders_height = int(height * SHOULDERS_HEIGHT_RATIO)
     
     print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Starting final processing with face KDE...")
     for frame_index, frame in enumerate(frames_bgr):
         current_mask = combined_mask_list[frame_index]
         face_mask = np.copy(current_mask)
-        face_mask[SHOULDERS_HEIGHT:, :] = 0
+        face_mask[shoulders_height:, :] = 0
         face_mask_indices = np.where(face_mask == 1)
         if len(face_mask_indices[0]) > 0:
             y_center, x_center = int(np.mean(face_mask_indices[0])), int(np.mean(face_mask_indices[1]))
@@ -356,7 +366,7 @@ def apply_face_kde_and_finalize_masks(frames_bgr, combined_mask_list, face_foreg
         
         # Apply morphological operations to clean up noise in the relevant region
         morph_region_y_start = max(0, y_center - FACE_WINDOW_HEIGHT // 2)
-        morph_region_y_end = min(height, LEGS_HEIGHT)
+        morph_region_y_end = legs_height
         if morph_region_y_start < morph_region_y_end:
             final_mask[morph_region_y_start:morph_region_y_end, :] = cv2.morphologyEx(
                 final_mask[morph_region_y_start:morph_region_y_end, :], cv2.MORPH_OPEN, np.ones((6, 1), np.uint8))
@@ -417,8 +427,8 @@ def background_subtraction(input_video_path, output_path):
         frames_bgr, combined_masks, face_foreground_pdf, face_background_pdf, n_frames, height, width)
     
     # Step 9: Save the results as videos
-    extracted_output_path = os.path.join("Outputs", "extracted_208484097_318931573.avi")
-    binary_output_path = os.path.join("Outputs", "binary_208484097_318931573.avi")
+    extracted_output_path = os.path.join(output_path, "extracted_208484097_318931573.avi")
+    binary_output_path = os.path.join(output_path, "binary_208484097_318931573.avi")
     write_video(extracted_output_path, frames=final_frames, fps=fps, out_size=(width, height), is_color=True)
     write_video(binary_output_path, frames=final_masks, fps=fps, out_size=(width, height), is_color=False)
     print(f"[BG_SUB | {time.strftime('%H:%M:%S')}] Output videos saved: extracted and binary masks.")
