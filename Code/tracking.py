@@ -16,7 +16,6 @@ def get_video_files(path):
     
     return cap, video_width, video_height, fps
 
-
 def load_entire_video(cap, color_space='bgr'):
     """Load all video frames"""
     frames = []
@@ -30,7 +29,6 @@ def load_entire_video(cap, color_space='bgr'):
     
     return frames
 
-
 def write_video(output_path, frames, fps, size, is_color=True):
     """Write video"""
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -41,48 +39,58 @@ def write_video(output_path, frames, fps, size, is_color=True):
     
     out.release()
 
-
 def automatic_roi_selection(frame):
     """
     Automatic ROI selection with coordinates to cover the full person including legs.
     """
     height, width = frame.shape[:2]
     
-    # Adjusted coordinates to cover full person including legs
-    person_left_percent = 0.03    # Move slightly more left to capture full width
-    person_top_percent = 0.12     # Start higher to capture head better
-    person_width_percent = 0.20   # Much wider to capture full body width including arms
-    person_height_percent = 0.75  # Much taller to capture full legs down to feet
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Video dimensions: {width}x{height}")
+    # Method 1: Try hardcoded coordinates first
+    friend_x, friend_y, friend_w, friend_h = 180, 60, 340, 740
     
-    # Convert percentages to pixel coordinates
-    x = int(width * person_left_percent)
-    y = int(height * person_top_percent)
-    w = int(width * person_width_percent)
-    h = int(height * person_height_percent)
+    # Check if the coordinates fit in your video
+    if (friend_x + friend_w <= width and friend_y + friend_h <= height):
+        x, y, w, h = friend_x, friend_y, friend_w, friend_h
+        print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Using friend's exact coordinates")
+    else:
+        # Method 2: Scale coordinates to your video size
+        scale_x = width / 800.0
+        scale_y = height / 600.0
+        
+        x = int(friend_x * scale_x)
+        y = int(friend_y * scale_y)
+        w = int(friend_w * scale_x)
+        h = int(friend_h * scale_y)
+        
+        # Ensure coordinates are within bounds
+        x = max(0, min(x, width - w))
+        y = max(0, min(y, height - h))
+        w = min(w, width - x)
+        h = min(h, height - y)
+        
+        print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Scaled friend's coordinates")
     
-    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Full-body ROI: ({x}, {y}, {w}, {h})")
-    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] This should cover the person from head to feet")
-    
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] ROI: ({x}, {y}, {w}, {h})")
     return (x, y, w, h)
 
 def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     """
-    Your friend's tracking with automatic ROI selection - no user interaction.
+    MeanShift tracking method
     """
-    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Starting automatic tracking")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Starting MeanShift tracking")
 
     cap_stabilize, video_width, video_height, fps = get_video_files(path=input_video_path)
     frames_bgr = load_entire_video(cap_stabilize, color_space='bgr')
     
     # Use automatic ROI selection
     initBB = automatic_roi_selection(frames_bgr[0])
-    
     x, y, w, h = initBB
-    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Using automatic ROI: ({x}, {y}, {w}, {h})")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Using ROI: ({x}, {y}, {w}, {h})")
     
     track_window = (x, y, w, h)
 
-    # Set up the ROI for tracking (exactly like your friend's code)
+    # Set up the ROI for tracking 
     roi = frames_bgr[0][y:y + h, x:x + w]
     hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     reducing_light_mask = cv2.inRange(hsv_roi, np.array((0., 60., 32.)), np.array((180., 255., 255.)))
@@ -103,7 +111,7 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     tracking_data["0"] = [y, x, h, w]
     
     # Track remaining frames
-    for frame_index, frame in enumerate(frames_bgr[1:], 1):
+    for frame_index, frame in enumerate(frames_bgr[1:]):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         dst = cv2.calcBackProject([hsv], [0, 1], roi_hist, [0, 256, 0, 256], 1)
         
@@ -113,10 +121,10 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
         # Draw rectangle
         x, y, w, h = track_window
         tracked_img = cv2.rectangle(frame.copy(), (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cv2.putText(tracked_img, f'Frame: {frame_index}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(tracked_img, f'Frame: {frame_index + 1}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         tracking_frames_list.append(tracked_img)
-        tracking_data[str(frame_index)] = [y, x, h, w]
+        tracking_data[str(frame_index + 1)] = [y, x, h, w]
 
     # Write outputs
     write_video(output_video_path, tracking_frames_list, fps, (video_width, video_height), is_color=True)
@@ -124,14 +132,13 @@ def track_video_auto(input_video_path, output_video_path, tracking_json_path):
     with open(tracking_json_path, 'w') as f:
         json.dump(tracking_data, f, indent=2)
     
-    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Automatic tracking completed")
+    print(f"[TRACKING | {time.strftime('%H:%M:%S')}] MeanShift tracking completed")
     print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Output video saved: {output_video_path}")
     print(f"[TRACKING | {time.strftime('%H:%M:%S')}] Tracking JSON saved: {tracking_json_path}")
     
     cap_stabilize.release()
     
     return tracking_data
-
 
 def run_auto_tracking(student_id1, student_id2, output_dir):
     """
@@ -157,3 +164,5 @@ def run_auto_tracking(student_id1, student_id2, output_dir):
         import traceback
         traceback.print_exc()
         return False
+
+
