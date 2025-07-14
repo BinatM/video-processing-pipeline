@@ -1,7 +1,7 @@
 {
-    "time_to_stabilize": 11.42195200920105,
-    "time_to_binary": 389.18376088142395,
-    "time_to_alpha": 473.75531005859375,
-    "time_to_matted": 473.7533781528473,
-    "time_to_output": 478.52775597572327
+    "time_to_stabilize": 8.513638257980347,
+    "time_to_binary": 300.56675934791565,
+    "time_to_alpha": 360.48899936676025,
+    "time_to_matted": 360.4887762069702,
+    "time_to_output": 365.1082491874695
 }

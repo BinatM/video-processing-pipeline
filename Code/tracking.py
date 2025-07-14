@@ -152,7 +152,7 @@ def run_auto_tracking(student_id1, student_id2, output_dir):
         print(f"Error: Input video not found: {matted_video}")
         return False
     
-    os.makedirs(output_dir, exist_ok=True)
+    # os.makedirs(output_dir, exist_ok=True)
     
     try:
         tracking_data = track_video_auto(matted_video, output_video, tracking_json)

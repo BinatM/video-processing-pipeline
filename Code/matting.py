@@ -83,54 +83,6 @@ def create_trimap(binary_mask, erode_size=3, dilate_size=10):
     
     return trimap
 
-
-def closed_form_matting(image, trimap, lambda_val=100, win_size=1):
-    """
-    Closed-form matting implementation based on Levin et al. 2006
-    
-    Args:
-        image: Input image (H, W, 3) in range [0, 255]
-        trimap: Trimap (H, W) with values 0=bg, 128=unknown, 255=fg
-        lambda_val: Regularization parameter
-        win_size: Window size (1 means 3x3 window)
-    """
-    h, w, c = image.shape
-    img = image.astype(np.float64) / 255.0
-    
-    # Convert trimap to alpha constraints
-    alpha = np.zeros((h, w), dtype=np.float64)
-    alpha[trimap == 255] = 1.0
-    alpha[trimap == 0] = 0.0
-    
-    # Find unknown pixels
-    unknown_mask = (trimap == 128)
-    if not np.any(unknown_mask):
-        return alpha
-    
-    L = build_matting_laplacian(img, win_size)
-    
-    # Known alpha values (foreground and background)
-    known_mask = (trimap != 128)
-    known_indices = np.where(known_mask.flatten())[0]
-    
-    # Create constraint matrix
-    C = sp.diags(known_mask.flatten().astype(np.float64), format='csr')
-    
-    # Solve the linear system: (L + λC)α = λCα_known
-    print("Solving linear system...")
-    A = L + lambda_val * C
-    b = lambda_val * C.dot(alpha.flatten())
-    
-    # Solve using sparse solver
-    alpha_result = spsolve(A, b)
-    alpha_result = alpha_result.reshape((h, w))
-    
-    # Clip to valid range
-    alpha_result = np.clip(alpha_result, 0, 1)
-    
-    return alpha_result
-
-
 def build_matting_laplacian(img, win_size=1):
     """
     Build the matting Laplacian matrix
@@ -250,7 +202,7 @@ def optimized_closed_form_matting(image, trimap, lambda_val=100):
     return np.clip(result, 0, 1)
 
 
-def perform_matting_closed_form(extracted_frame, binary_mask, background, method='optimized'):
+def perform_matting_closed_form(extracted_frame, binary_mask, background):
     """
     Complete matting pipeline using closed-form matting
     """
@@ -262,10 +214,8 @@ def perform_matting_closed_form(extracted_frame, binary_mask, background, method
     trimap = create_trimap(binary_mask, erode_size=5, dilate_size=15)
     
     # Generate alpha matte using closed-form matting
-    if method == 'optimized':
-        alpha = optimized_closed_form_matting(extracted_frame, trimap, lambda_val=100)
-    else:
-        alpha = closed_form_matting(extracted_frame, trimap, lambda_val=100)
+    alpha = optimized_closed_form_matting(extracted_frame, trimap, lambda_val=100)
+    
     
     # Additional smoothing
     alpha = cv2.bilateralFilter(alpha.astype(np.float32), 5, 0.1, 5)
@@ -286,19 +236,16 @@ def perform_matting_closed_form(extracted_frame, binary_mask, background, method
 
 
 # Update the main matting function
-def run_matting_stage_closed_form(ids, main_start_time, input_dir, output_dir, method='optimized'):
+def run_matting_stage_closed_form(ids, main_start_time, input_dir, output_dir):
     """
     Main function to run the matting stage with closed-form matting
     """
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting closed-form matting stage, method={method}")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting closed-form matting stage")
     id1, id2 = ids
     # Load previous outputs
     extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids, input_dir, output_dir)
     time_alpha_created = 0
     time_matted_created = 0
-    
-    # Ensure Outputs directory exists
-    os.makedirs("Outputs", exist_ok=True)
     
     # Setup output videos
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -314,7 +261,7 @@ def run_matting_stage_closed_form(ids, main_start_time, input_dir, output_dir, m
     
     frame_count = 0
     
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Processing {total_frames} frames (closed-form)")
+    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Processing {total_frames} frames")
     
     try:
         while True:
@@ -326,7 +273,7 @@ def run_matting_stage_closed_form(ids, main_start_time, input_dir, output_dir, m
             
             # Perform closed-form matting
             matted_frame, alpha = perform_matting_closed_form(
-                extracted_frame, binary_mask, background, method=method)
+                extracted_frame, binary_mask, background)
             
             # Convert alpha to uint8 for saving (scale from [0,1] to [0,255])
             alpha_uint8 = (alpha * 255).astype(np.uint8)

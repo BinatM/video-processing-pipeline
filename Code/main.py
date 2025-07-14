@@ -40,7 +40,7 @@ def main():
         
         # Step 3: Matting
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Initiating matting stage...")
-        matting_times = run_matting_stage_closed_form((student_id1, student_id2), main_start_time, INPUT_DIR, OUTPUT_DIR, method='optimized')
+        matting_times = run_matting_stage_closed_form((student_id1, student_id2), main_start_time, INPUT_DIR, OUTPUT_DIR)
         timing_data.update(matting_times)
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Matting stage finished.")
 
