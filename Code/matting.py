@@ -5,16 +5,16 @@ import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
 
-def load_previous_outputs(ids):
+def load_previous_outputs(ids, input_dir, output_dir):
     """
     Load the outputs from previous stages
     """
     id1, id2 = ids
     
     # Define paths
-    extracted_path = f"../Outputs/extracted_{id1}_{id2}.avi"
-    binary_path = f"../Outputs/binary_{id1}_{id2}.avi"
-    background_path = "../Inputs/background.jpg"
+    extracted_path = os.path.join(output_dir, f"extracted_{id1}_{id2}.avi")
+    binary_path = os.path.join(output_dir, f"binary_{id1}_{id2}.avi")
+    background_path =os.path.join(input_dir, "background.jpg")
     
     # Load background image
     background = cv2.imread(background_path)
@@ -37,6 +37,7 @@ def load_previous_outputs(ids):
     total_frames = int(extracted_cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     return extracted_cap, binary_cap, background, (width, height, fps, total_frames)
+
 
 def read_frame_pair(extracted_cap, binary_cap):
     """
@@ -81,122 +82,6 @@ def create_trimap(binary_mask, erode_size=3, dilate_size=10):
     trimap[bg_sure == 255] = 0    # Background
     
     return trimap
-
-
-def alpha_from_trimap_distance(trimap):
-    """
-    Fast alpha estimation using distance transform
-    """
-    # Separate regions
-    fg_mask = (trimap == 255).astype(np.uint8)
-    bg_mask = (trimap == 0).astype(np.uint8)
-    unknown_mask = (trimap == 128).astype(np.uint8)
-    
-    # Distance transforms
-    dist_fg = cv2.distanceTransform(fg_mask, cv2.DIST_L2, 5)
-    dist_bg = cv2.distanceTransform(bg_mask, cv2.DIST_L2, 5)
-    
-    # Alpha in unknown region
-    alpha = np.ones_like(trimap, dtype=np.float32)
-    alpha[bg_mask == 1] = 0.0
-    
-    unknown_pixels = unknown_mask == 1
-    if np.any(unknown_pixels):
-        fg_dist = dist_fg[unknown_pixels]
-        bg_dist = dist_bg[unknown_pixels]
-        total_dist = fg_dist + bg_dist
-        total_dist[total_dist == 0] = 1  # Avoid division by zero
-        alpha[unknown_pixels] = fg_dist / total_dist
-    
-    # Smooth the alpha
-    alpha = cv2.GaussianBlur(alpha, (5, 5), 1.0)
-    return np.clip(alpha, 0, 1)
-
-
-def perform_matting(extracted_frame, binary_mask, background):
-    """
-    Complete matting pipeline for one frame
-    """
-    # Resize background to match frame size
-    h, w = extracted_frame.shape[:2]
-    background_resized = cv2.resize(background, (w, h))
-    
-    # Create trimap
-    trimap = create_trimap(binary_mask)
-    
-    # Generate alpha matte
-    alpha = alpha_from_trimap_distance(trimap)
-    
-    # Additional smoothing
-    alpha = cv2.bilateralFilter(alpha, 5, 0.1, 5)
-    alpha = np.clip(alpha, 0, 1)
-    
-    # Create 3-channel alpha
-    alpha_3ch = np.stack([alpha, alpha, alpha], axis=2)
-    
-    # Extract person pixels (non-zero regions from extracted video)
-    person_mask = np.any(extracted_frame > 0, axis=2, keepdims=True).astype(np.float32)
-    person_pixels = extracted_frame.astype(np.float32) * person_mask
-    
-    # Final composition
-    matted_frame = (person_pixels * alpha_3ch + 
-                   background_resized.astype(np.float32) * (1 - alpha_3ch))
-    
-    return matted_frame.astype(np.uint8), alpha
-
-
-def run_matting_stage(ids):
-    """
-    Main function to run the matting stage
-    """
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting matting stage...")
-    id1, id2 = ids
-    
-    # Load previous outputs
-    extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids)
-    
-    # Setup output videos
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    
-    matted_path = f"../Outputs/matted_{id1}_{id2}.avi"
-    alpha_path = f"../Outputs/alpha_{id1}_{id2}.avi"
-    
-    matted_writer = cv2.VideoWriter(matted_path, fourcc, fps, (width, height))
-    alpha_writer = cv2.VideoWriter(alpha_path, fourcc, fps, (width, height))
-    
-    frame_count = 0
-    
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Processing {total_frames} frames...")
-    
-    while True:
-        # Read frame pair
-        extracted_frame, binary_mask, success = read_frame_pair(extracted_cap, binary_cap)
-        
-        if not success:
-            break
-        
-        # Perform matting
-        matted_frame, alpha = perform_matting(extracted_frame, binary_mask, background)
-        
-        # Convert alpha to uint8 for saving (scale from [0,1] to [0,255])
-        alpha_uint8 = (alpha * 255).astype(np.uint8)
-        alpha_3ch = cv2.cvtColor(alpha_uint8, cv2.COLOR_GRAY2BGR)
-        
-        # Write frames
-        matted_writer.write(matted_frame)
-        alpha_writer.write(alpha_3ch)
-        
-        frame_count += 1
-    
-    # Cleanup
-    extracted_cap.release()
-    binary_cap.release()
-    matted_writer.release()
-    alpha_writer.release()
-    
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Matting completed, processed {frame_count} frames")
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Output saved: {matted_path}")
-    print(f"[MATTING | {time.strftime('%H:%M:%S')}] Alpha saved: {alpha_path}")
 
 
 def closed_form_matting(image, trimap, lambda_val=100, win_size=1):
@@ -401,14 +286,14 @@ def perform_matting_closed_form(extracted_frame, binary_mask, background, method
 
 
 # Update the main matting function
-def run_matting_stage_closed_form(ids, main_start_time, method='optimized'):
+def run_matting_stage_closed_form(ids, main_start_time, input_dir, output_dir, method='optimized'):
     """
     Main function to run the matting stage with closed-form matting
     """
     print(f"[MATTING | {time.strftime('%H:%M:%S')}] Starting closed-form matting stage, method={method}")
     id1, id2 = ids
     # Load previous outputs
-    extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids)
+    extracted_cap, binary_cap, background, (width, height, fps, total_frames) = load_previous_outputs(ids, input_dir, output_dir)
     time_alpha_created = 0
     time_matted_created = 0
     
@@ -418,8 +303,8 @@ def run_matting_stage_closed_form(ids, main_start_time, method='optimized'):
     # Setup output videos
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     
-    matted_path = f"../Outputs/matted_{id1}_{id2}.avi"
-    alpha_path = f"../Outputs/alpha_{id1}_{id2}.avi"
+    matted_path = os.path.join(output_dir, f"matted_{id1}_{id2}.avi")
+    alpha_path = os.path.join(output_dir, f"alpha_{id1}_{id2}.avi")
     
     matted_writer = cv2.VideoWriter(matted_path, fourcc, fps, (width, height))
     alpha_writer = cv2.VideoWriter(alpha_path, fourcc, fps, (width, height))

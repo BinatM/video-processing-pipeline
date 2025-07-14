@@ -22,7 +22,6 @@ def main():
 
     input_video = os.path.join(INPUT_DIR, "INPUT.avi")
     stabilized_video = os.path.join(OUTPUT_DIR, f"stabilize_{student_id1}_{student_id2}.avi")
-    output_dir = OUTPUT_DIR
     
     timing_data = {}
     
@@ -35,19 +34,19 @@ def main():
         
         # Step 2: Background Subtraction
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Initiating background subtraction...")
-        background_subtraction(stabilized_video, output_dir)
+        background_subtraction(stabilized_video, OUTPUT_DIR)
         timing_data["time_to_binary"] = time.time() - main_start_time
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Background subtraction finished. Cumulative time: {timing_data['time_to_binary']:.2f}s")
         
         # Step 3: Matting
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Initiating matting stage...")
-        matting_times = run_matting_stage_closed_form((student_id1, student_id2), main_start_time, method='optimized')
+        matting_times = run_matting_stage_closed_form((student_id1, student_id2), main_start_time, INPUT_DIR, OUTPUT_DIR, method='optimized')
         timing_data.update(matting_times)
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Matting stage finished.")
 
         # Step 4: Tracking
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Initiating tracking stage...")
-        success = run_auto_tracking(student_id1, student_id2, output_dir)
+        success = run_auto_tracking(student_id1, student_id2, OUTPUT_DIR)
         if success:
             timing_data["time_to_output"] = time.time() - main_start_time
             print(f"[MAIN | {time.strftime('%H:%M:%S')}] Tracking stage finished. Cumulative time: {timing_data['time_to_output']:.2f}s")
@@ -59,7 +58,7 @@ def main():
         mins, secs = divmod(total_time, 60)
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] Total pipeline time: {int(mins)}m{secs:.2f}s")
         
-        with open(os.path.join(output_dir, "timing.json"), "w") as f:
+        with open(os.path.join(OUTPUT_DIR, "timing.json"), "w") as f:
             json.dump(timing_data, f, indent=4)
         print(f"[MAIN | {time.strftime('%H:%M:%S')}] timing.json file created successfully.")
             
